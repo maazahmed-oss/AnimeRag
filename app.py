@@ -51,7 +51,7 @@ client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 # --------------------------------------------------
 # 4. LOAD ANIME CSV (RAG DATA)
 # --------------------------------------------------
-CSV_FILE = "anime.csv"
+CSV_FILE = "Anime.csv"
 
 @st.cache_data
 def load_anime_data():
