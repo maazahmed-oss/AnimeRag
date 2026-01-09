@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
-# 2. PROFESSIONAL UI STYLING
+# 2. UI STYLING
 # --------------------------------------------------
 st.markdown("""
 <style>
@@ -40,7 +40,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --------------------------------------------------
-# 3. GROQ CONNECTION
+# 3. GROQ API
 # --------------------------------------------------
 if "GROQ_API_KEY" not in st.secrets:
     st.error("⚠️ GROQ_API_KEY missing in Streamlit secrets.")
@@ -49,19 +49,32 @@ if "GROQ_API_KEY" not in st.secrets:
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 # --------------------------------------------------
-# 4. LOAD ANIME CSV (RAG DATA)
+# 4. FIND CSV FILE (CASE SAFE)
 # --------------------------------------------------
-CSV_FILE = "Anime.csv"
+def find_csv_file():
+    for f in os.listdir("."):
+        if f.lower() == "anime.csv":
+            return f
+    return None
 
+CSV_FILE = find_csv_file()
+
+if not CSV_FILE:
+    st.error("❌ Anime.csv not found in repository.")
+    st.stop()
+
+# --------------------------------------------------
+# 5. LOAD CSV (EXACT COLUMN MATCH)
+# --------------------------------------------------
 @st.cache_data
-def load_anime_data():
-    if not os.path.exists(CSV_FILE):
-        return None, None
+def load_anime_data(csv_file):
+    df = pd.read_csv(csv_file)
 
-    df = pd.read_csv(CSV_FILE)
+    # Explicit mapping (your real columns)
+    df = df[['Name', 'Rating']].dropna()
 
-    # Basic cleanup
-    df = df[['name', 'rating']].dropna()
+    # Standardize column names
+    df.columns = ['name', 'rating']
 
     # Convert to text for LLM
     anime_text = ""
@@ -70,25 +83,22 @@ def load_anime_data():
 
     return df, anime_text
 
-anime_df, anime_text = load_anime_data()
 
-if anime_df is None:
-    st.error("❌ anime.csv file not found. Please upload it.")
-    st.stop()
+anime_df, anime_text = load_anime_data(CSV_FILE)
 
 # --------------------------------------------------
-# 5. SIDEBAR
+# 6. SIDEBAR
 # --------------------------------------------------
 with st.sidebar:
     st.markdown("## 🎌 AnimeRAG")
-    st.caption("v1.0 • Anime Intelligence System")
+    st.caption("v1.2 • Real Anime Dataset")
     st.divider()
 
     st.markdown("### 📊 Dataset Info")
     st.info(f"""
+- File: **{CSV_FILE}**
 - Total Anime: **{len(anime_df)}**
-- Data Source: CSV
-- Fields: Name, Rating
+- Columns Used: Name, Rating
 """)
 
     st.divider()
@@ -97,31 +107,30 @@ with st.sidebar:
         st.rerun()
 
 # --------------------------------------------------
-# 6. MAIN HEADER
+# 7. MAIN HEADER
 # --------------------------------------------------
 st.markdown('<p class="main-title">AnimeRAG</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-text">Ask anything about anime ratings</p>', unsafe_allow_html=True)
 
 # --------------------------------------------------
-# 7. CHAT SESSION INIT
+# 8. CHAT INIT
 # --------------------------------------------------
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant",
-            "content": "👋 **Assalam o Alaikum!**\n\nI am **AnimeRAG**. You can ask me about anime names, ratings, or top-rated anime from the dataset."
-        }
-    ]
+    st.session_state.messages = [{
+        "role": "assistant",
+        "content": (
+            "👋 **Assalam o Alaikum!**\n\n"
+            "I am **AnimeRAG**.\n"
+            "You can ask about anime ratings, top-rated anime, or filters like rating > 9."
+        )
+    }]
 
-# --------------------------------------------------
-# 8. DISPLAY CHAT HISTORY
-# --------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 # --------------------------------------------------
-# 9. USER INPUT + GROQ STREAMING
+# 9. USER INPUT + STREAMING
 # --------------------------------------------------
 if prompt := st.chat_input("Ask: rating of Naruto, top anime, rating > 9..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -130,38 +139,32 @@ if prompt := st.chat_input("Ask: rating of Naruto, top anime, rating > 9..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        response_box = st.empty()
-        full_response = ""
+        box = st.empty()
+        answer = ""
 
-        try:
-            stream = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"""
+        stream = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"""
 You are AnimeRAG.
-Answer ONLY from the given anime dataset.
-If anime is not found, say: "Anime not found in dataset."
+Answer ONLY from this anime dataset.
+If anime not found, say clearly.
 
 Dataset:
 {anime_text[:15000]}
 """
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                stream=True
-            )
+                },
+                {"role": "user", "content": prompt}
+            ],
+            stream=True
+        )
 
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    full_response += chunk.choices[0].delta.content
-                    response_box.markdown(full_response + "▌")
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                answer += chunk.choices[0].delta.content
+                box.markdown(answer + "▌")
 
-            response_box.markdown(full_response)
-            st.session_state.messages.append(
-                {"role": "assistant", "content": full_response}
-            )
-
-        except Exception as e:
-            st.error(f"⚠️ Error: {e}")
+        box.markdown(answer)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
